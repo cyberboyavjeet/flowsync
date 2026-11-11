@@ -1,92 +1,108 @@
-import { useMemo } from 'react';
-import { AgGridReact } from 'ag-grid-react';
-import { ColDef, ICellRendererParams } from 'ag-grid-community';
-import { Invoice } from '../data/mockData';
+import React, { useState } from "react";
+import { InvoiceRecord, payInvoice } from "../services/api";
 
 interface ReceivablesGridProps {
-  invoices: Invoice[];
+  invoices: InvoiceRecord[];
+  loading?: boolean;
 }
 
-const RiskScoreRenderer = (params: ICellRendererParams) => {
-  const score = params.value;
-  let color = 'bg-green-500';
-  if (score > 70) color = 'bg-red-500';
-  else if (score > 40) color = 'bg-yellow-500';
 
-  return (
-    <div className="flex items-center h-full w-full">
-      <div className="w-full bg-slate-200 rounded-full h-2.5 dark:bg-slate-700 overflow-hidden">
-        <div className={`${color} h-2.5 rounded-full`} style={{ width: `${score}%` }}></div>
-      </div>
-      <span className="ml-2 text-xs font-medium text-slate-600">{score}/100</span>
-    </div>
-  );
-};
+export default function ReceivablesGrid({ invoices, loading }: ReceivablesGridProps) {
+  const [processingId, setProcessingId] = useState<number | null>(null);
 
-const StatusRenderer = (params: ICellRendererParams) => {
-  const status = params.value;
-  let classes = 'bg-slate-100 text-slate-800';
-  
-  if (status === 'Action Taken') classes = 'bg-green-100 text-green-800';
-  if (status === 'Overdue') classes = 'bg-red-100 text-red-800';
-  if (status === 'Critical') classes = 'bg-red-200 text-red-900 font-bold';
-  if (status === 'Upcoming') classes = 'bg-blue-100 text-blue-800';
-
-  return (
-    <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${classes}`}>
-      {status}
-    </span>
-  );
-};
-
-export function ReceivablesGrid({ invoices }: ReceivablesGridProps) {
-  const columnDefs = useMemo<ColDef[]>(() => [
-    { field: 'clientName', headerName: 'Client Name', flex: 1, filter: true },
-    { 
-      field: 'invoiceAmount', 
-      headerName: 'Amount', 
-      flex: 1,
-      valueFormatter: (params) => `$${params.value.toLocaleString()}`,
-      sortable: true
-    },
-    { field: 'daysOverdue', headerName: 'Days Overdue', flex: 1, sortable: true },
-    { 
-      field: 'riskScore', 
-      headerName: 'AI Risk Score', 
-      flex: 1.5,
-      cellRenderer: RiskScoreRenderer,
-      sortable: true
-    },
-    { 
-      field: 'status', 
-      headerName: 'Status', 
-      flex: 1,
-      cellRenderer: StatusRenderer,
-      filter: true
+  const handlePay = async (invoiceId: number) => {
+    try {
+      setProcessingId(invoiceId);
+      const res = await payInvoice(invoiceId);
+      if (res.approval_url) {
+        window.open(res.approval_url, "_blank");
+      }
+    } catch (err: any) {
+      alert("Payment Error: " + err.message);
+    } finally {
+      setProcessingId(null);
     }
-  ], []);
+  };
 
-  const defaultColDef = useMemo<ColDef>(() => ({
-    resizable: true,
-  }), []);
+  if (loading) {
+    return <div className="text-slate-400 py-8 text-center text-sm">Loading records from PostgreSQL...</div>;
+  }
+
+  if (invoices.length === 0) {
+    return <div className="text-slate-500 py-8 text-center text-sm">No invoices recorded in database yet.</div>;
+  }
 
   return (
-    <div className="flex-1 bg-card rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-full">
-      <div className="p-4 border-b border-slate-200">
-        <h2 className="text-lg font-semibold text-slate-800">Outstanding Receivables</h2>
-      </div>
-      <div className="flex-1 w-full ag-theme-alpine">
-        <AgGridReact
-          rowData={invoices}
-          columnDefs={columnDefs}
-          defaultColDef={defaultColDef}
-          animateRows={true}
-          rowSelection="single"
-          headerHeight={48}
-          rowHeight={56}
-          domLayout='normal'
-        />
-      </div>
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-sm border-collapse">
+        <thead>
+          <tr className="border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider">
+            <th className="py-3 px-4">Invoice #</th>
+            <th className="py-3 px-4">Customer</th>
+            <th className="py-3 px-4">Amount</th>
+            <th className="py-3 px-4">Due Date</th>
+            <th className="py-3 px-4">Status</th>
+            <th className="py-3 px-4">Risk Tier</th>
+            <th className="py-3 px-4 text-right">Action</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-800/60 text-slate-200">
+          {invoices.map((inv) => (
+            <tr key={inv.id} className="hover:bg-slate-800/40 transition">
+              <td className="py-3 px-4 font-mono font-medium">{inv.invoice_number}</td>
+              <td className="py-3 px-4">{inv.customer_name}</td>
+              <td className="py-3 px-4 font-semibold text-emerald-400">
+                ${inv.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </td>
+              <td className="py-3 px-4 text-slate-400">
+                {new Date(inv.due_date).toLocaleDateString()}
+              </td>
+              <td className="py-3 px-4">
+                <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                  inv.status === "PAID"
+                    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                    : "bg-slate-800 border border-slate-700 text-slate-300"
+                }`}>
+                  {inv.status}
+                </span>
+              </td>
+              <td className="py-3 px-4">
+                <span
+                  className={`px-2.5 py-1 rounded text-xs font-semibold ${
+                    inv.risk_tier === "HIGH"
+                      ? "bg-red-500/20 text-red-400 border border-red-500/30"
+                      : inv.risk_tier === "MEDIUM"
+                      ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                      : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                  }`}
+                >
+                  {inv.risk_tier} ({inv.risk_score})
+                </span>
+              </td>
+              <td className="py-3 px-4 text-right">
+                {inv.status !== "PAID" ? (
+                  <button
+  onClick={() => handlePay(inv.id)}
+  disabled={processingId === inv.id}
+  className="px-3 py-1 bg-amber-500 hover:bg-amber-400 disabled:bg-amber-700/50 disabled:cursor-not-allowed text-slate-950 font-semibold text-xs rounded transition shadow-sm flex items-center gap-1.5 ml-auto"
+>
+  {processingId === inv.id ? (
+    <>
+      <span className="w-3 h-3 border-2 border-slate-900 border-t-transparent rounded-full animate-spin"></span>
+      <span>Generating Checkout...</span>
+    </>
+  ) : (
+    "Pay via PayPal"
+  )}
+</button>
+                ) : (
+                  <span className="text-xs text-slate-500 italic">Settled</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -1,88 +1,110 @@
-import { useState } from 'react';
-import { Bot, Info, CheckCircle, ArrowRight, Loader2 } from 'lucide-react';
+import React, { useEffect, useState } from "react";
+import { getAgentRecommendations, AgentRecommendation, payInvoice } from "../services/api";
 
 interface AgentConsoleProps {
-  onTakeAction: () => void;
-  isActionTaken: boolean;
+  onActionTriggered?: () => void;
 }
 
-export function AgentConsole({ onTakeAction, isActionTaken }: AgentConsoleProps) {
-  const [isExecuting, setIsExecuting] = useState(false);
+export const AgentConsole: React.FC<AgentConsoleProps> = ({ onActionTriggered }) => {
+  const [recommendations, setRecommendations] = useState<AgentRecommendation[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [activeMessage, setActiveMessage] = useState<string | null>(null);
 
-  const handleAction = () => {
-    setIsExecuting(true);
-    // Simulate API Call delay
-    setTimeout(() => {
-      setIsExecuting(false);
-      onTakeAction();
-    }, 2000);
+  const fetchActions = async () => {
+    try {
+      setLoading(true);
+      const data = await getAgentRecommendations();
+      setRecommendations(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchActions();
+  }, []);
+
+  const handleExecute = async (rec: AgentRecommendation) => {
+    if (rec.action_type === "OFFER_DISCOUNT") {
+      setActiveMessage(`Generating discounted PayPal order for ${rec.customer_name}...`);
+      try {
+        const res = await payInvoice(rec.invoice_id);
+        if (res.approval_url) {
+          window.open(res.approval_url, "_blank");
+          setActiveMessage(`Discount payment link opened for ${rec.invoice_number}!`);
+        }
+      } catch (err: any) {
+        setActiveMessage(`Action failed: ${err.message}`);
+      }
+    } else {
+      setActiveMessage(`Automated reminder dispatched to ${rec.customer_name} for ${rec.invoice_number}.`);
+    }
+
+    if (onActionTriggered) onActionTriggered();
+    setTimeout(() => setActiveMessage(null), 5000);
   };
 
   return (
-    <div className="w-[350px] bg-slate-50 border-l border-slate-200 flex flex-col h-full">
-      <div className="p-4 border-b border-slate-200 bg-white flex items-center space-x-2">
-        <Bot className="text-primary" size={24} />
-        <h2 className="text-lg font-semibold text-slate-800">AI Recovery Agent</h2>
+    <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 shadow-xl">
+      <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div className="flex items-center gap-2">
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          <h2 className="text-base font-semibold text-white">FlowSync Autonomous Action Agent</h2>
+        </div>
+        <button
+          onClick={fetchActions}
+          className="text-xs text-slate-400 hover:text-slate-200 transition"
+        >
+          Re-evaluate
+        </button>
       </div>
 
-      <div className="p-6 flex-1 overflow-y-auto">
-        {!isActionTaken && !isExecuting && (
-          <div className="space-y-4">
-            <div className="flex items-center space-x-2 text-sm text-slate-500 mb-4 animate-pulse">
-              <Loader2 className="animate-spin" size={16} />
-              <span>Investigating Cash-Flow Alert...</span>
-            </div>
-            
-            <div className="bg-white border border-red-200 rounded-xl p-4 shadow-sm relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-1 h-full bg-red-500"></div>
-              <h3 className="font-semibold text-slate-800 mb-2">High Default Risk Detected</h3>
-              <p className="text-sm text-slate-600 mb-4 leading-relaxed">
-                Client <strong className="text-slate-900">Acme Corp</strong> has an 85% default risk. 
-                A projected <strong className="text-red-600">$4,000 shortfall</strong> is expected on the 15th due to this unpaid invoice.
-              </p>
-              
-              <div className="flex space-x-3 mt-4">
-                <button className="flex-1 flex items-center justify-center space-x-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors">
-                  <Info size={16} />
-                  <span>Explain</span>
-                </button>
-                <button 
-                  onClick={handleAction}
-                  className="flex-[2] bg-primary hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
-                >
-                  Approve & Send PayPal Reminder
-                </button>
+      {activeMessage && (
+        <div className="mt-3 p-3 bg-blue-950/60 border border-blue-500/50 rounded text-blue-200 text-xs">
+          {activeMessage}
+        </div>
+      )}
+
+      <div className="mt-4 space-y-3">
+        {loading ? (
+          <div className="text-slate-500 text-xs py-4 text-center">Agent scanning active ledger risk...</div>
+        ) : recommendations.length === 0 ? (
+          <div className="text-slate-400 text-xs py-4 text-center">
+            Ledger stable: No elevated default risks detected across pending invoices.
+          </div>
+        ) : (
+          recommendations.map((rec) => (
+            <div
+              key={rec.invoice_id}
+              className="flex items-center justify-between bg-slate-950/60 border border-slate-800/80 rounded-lg p-3 text-xs"
+            >
+              <div className="space-y-1 max-w-xl">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-slate-300 font-semibold">{rec.invoice_number}</span>
+                  <span className="text-slate-400">({rec.customer_name})</span>
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                    rec.risk_tier === "HIGH" ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400"
+                  }`}>
+                    {rec.risk_tier} RISK ({rec.risk_score})
+                  </span>
+                </div>
+                <p className="text-slate-300">{rec.recommended_action}</p>
               </div>
-            </div>
-          </div>
-        )}
 
-        {isExecuting && (
-          <div className="flex flex-col items-center justify-center h-full space-y-4 text-center">
-            <Loader2 className="animate-spin text-primary" size={40} />
-            <div>
-              <p className="font-semibold text-slate-800">Executing via PayPal API...</p>
-              <p className="text-sm text-slate-500">Dispatching intelligent reminder sequence</p>
-            </div>
-          </div>
-        )}
-
-        {isActionTaken && !isExecuting && (
-          <div className="flex flex-col items-center justify-center h-full space-y-4 text-center">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-2">
-              <CheckCircle className="text-green-600" size={32} />
-            </div>
-            <div>
-              <p className="font-semibold text-slate-800 text-lg">Action Successful</p>
-              <p className="text-sm text-slate-500 mb-6">Payment plan activated via PayPal.</p>
-              <button className="flex items-center space-x-2 text-primary hover:text-indigo-700 font-medium text-sm mx-auto">
-                <span>View Transaction Log</span>
-                <ArrowRight size={16} />
+              <button
+                onClick={() => handleExecute(rec)}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded transition text-xs whitespace-nowrap ml-4"
+              >
+                Execute Agent Action
               </button>
             </div>
-          </div>
+          ))
         )}
       </div>
     </div>
   );
-}
+};
+
+export default AgentConsole;

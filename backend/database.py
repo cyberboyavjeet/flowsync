@@ -1,6 +1,7 @@
 import os
 import ssl
 from collections.abc import AsyncGenerator
+from datetime import datetime
 from urllib.parse import urlsplit, urlunsplit
 from dotenv import load_dotenv
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, String
@@ -10,7 +11,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from datetime import datetime
 
 load_dotenv()
 
@@ -18,17 +18,15 @@ raw_url = os.getenv("DATABASE_URL", "").strip()
 if not raw_url:
     raise ValueError("DATABASE_URL is not set in backend/.env")
 
-# 1. Normalize URL for asyncpg
+# Normalize connection string for asyncpg
 if raw_url.startswith("postgres://"):
     raw_url = raw_url.replace("postgres://", "postgresql+asyncpg://", 1)
 elif raw_url.startswith("postgresql://"):
     raw_url = raw_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-# 2. Strip URL parameters
 parsed = urlsplit(raw_url)
 clean_url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
 
-# 3. Render SSL context
 ssl_context = ssl.create_default_context()
 ssl_context.check_hostname = False
 ssl_context.verify_mode = ssl.CERT_NONE
@@ -51,7 +49,6 @@ AsyncSessionLocal = async_sessionmaker(
 class Base(DeclarativeBase):
     pass
 
-# Dependency for FastAPI routes
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         try:
@@ -59,7 +56,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         finally:
             await session.close()
 
-# FlowSync Database Models
 class BusinessEntity(Base):
     __tablename__ = "businesses"
 
@@ -77,16 +73,15 @@ class Invoice(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     invoice_number: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     business_id: Mapped[int] = mapped_column(ForeignKey("businesses.id"), index=True)
+    customer_name: Mapped[str] = mapped_column(String(120), default="General Customer")
 
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     due_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    status: Mapped[str] = mapped_column(String(32), default="PENDING")  # PENDING, PAID, OVERDUE
+    status: Mapped[str] = mapped_column(String(32), default="PENDING")
     paypal_order_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
-    # ML Inference outputs (from your ml_artifacts model)
     risk_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    risk_tier: Mapped[str | None] = mapped_column(String(16), nullable=True)  # LOW, MEDIUM, HIGH
+    risk_tier: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
     business: Mapped["BusinessEntity"] = relationship(back_populates="invoices")
