@@ -9,3 +9,4 @@ pydantic
 python-dotenv
 sqlalchemy[asyncio]
 asyncpg
+httpx
