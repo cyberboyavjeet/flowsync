@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { InvoiceRecord, payInvoice } from "../services/api";
 
 interface ReceivablesGridProps {
